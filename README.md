@@ -7,6 +7,9 @@ Machine Learning based Chess Cheat Detection using Stockfish, Random Forest, XGB
 Đây là đồ án cuối kỳ môn Học máy với mục tiêu xây dựng hệ thống phát hiện hành vi gian lận trong cờ vua trực tuyến bằng các kỹ thuật Machine Learning.
 
 Hệ thống sử dụng Stockfish để phân tích chất lượng nước đi của người chơi, trích xuất các đặc trưng quan trọng và huấn luyện mô hình nhằm phân loại người chơi thành hai nhóm: bình thường và có dấu hiệu sử dụng công cụ hỗ trợ.
+Dữ liệu gốc gồm 2000 ván cờ sạch từ lichess và 2000 ván cờ gian lận từ Kaggle 
+Dữ liệu được thu thập từ Kaggle và các nguồn công khai.
+Do dung lượng lớn nên không đính kèm toàn bộ dữ liệu gốc.
 
 ---
 
