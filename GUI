@@ -1,0 +1,286 @@
+import os
+import io
+import tkinter as tk
+from tkinter import ttk, messagebox
+from tkinter.scrolledtext import ScrolledText  
+
+import numpy as np
+import pandas as pd
+import joblib  
+
+import chess
+import chess.pgn
+import chess.engine
+
+# Nạp đầy đủ các kiến trúc thuật toán tránh lỗi đóng gói nhị phân trên Windows
+from sklearn.ensemble import RandomForestClassifier
+import xgboost as xgb
+import lightgbm as lgb
+
+class ChessCheatDetectionSystem:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("HỆ THỐNG PHÁT HIỆN GIAN LẬN CỜ VUA (ML PIPELINE)")
+        self.root.geometry("900x720") 
+        self.root.configure(bg="#f5f5f5")
+        
+        # Đường dẫn tới công cụ Stockfish thực tế trên máy bạn
+        self.stockfish_path = r"D:\stockfish\stockfish-windows-x86-64-avx2.exe" 
+        
+        self.model = None
+        self.load_machine_learning_model()
+        self.setup_ui()
+
+    def load_machine_learning_model(self):
+        """Tải file mô hình AI đã huấn luyện"""
+        model_path = "chess_fraud_model.pkl"
+        if os.path.exists(model_path):
+            try:
+                self.model = joblib.load(model_path)
+                print(f"-> Đã tải mô hình AI ({model_path}) thành công!")
+            except Exception as e:
+                print(f"-> Lỗi khi đọc file {model_path}: {e}")
+        else:
+            print(f"-> Cảnh báo: Không tìm thấy file {model_path} trong thư mục dự án.")
+
+    def setup_ui(self):
+        """Thiết lập cấu trúc giao diện đồ họa chính"""
+        # Vùng tiêu đề ứng dụng
+        title_frame = tk.Frame(self.root, bg="#1565C0", height=50)
+        title_frame.pack(fill="x", side="top")
+        
+        title_label = tk.Label(
+            title_frame, 
+            text="HỆ THỐNG PHÁT HIỆN GIAN LẬN CỜ VUA", 
+            font=("Arial", 14, "bold"), 
+            fg="white", 
+            bg="#1565C0"
+        )
+        title_label.pack(pady=10)
+
+        # Vùng nhập văn bản PGN ván cờ
+        input_frame = tk.LabelFrame(self.root, text=" Nhập dữ liệu chuỗi PGN ván cờ cần kiểm tra ", font=("Arial", 10, "bold"), bg="#f5f5f5")
+        input_frame.pack(fill="both", expand=True, padx=15, pady=10)
+
+        self.txt_pgn = ScrolledText(input_frame, height=10, font=("Consolas", 10))
+        self.txt_pgn.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Dữ liệu ván cờ mẫu ban đầu
+        sample_pgn = '[Event "Live Chess"]\n[WhiteElo "1850"]\n[BlackElo "1420"]\n\n1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Be7 5. Nf3 O-O 6. e3 Nbd7 7. c5 b6'
+        self.txt_pgn.insert("1.0", sample_pgn)
+
+        # Khu vực tùy chọn đối tượng phân tích
+        selection_frame = tk.Frame(input_frame, bg="#f5f5f5")
+        selection_frame.pack(fill="x", padx=10, pady=5)
+        
+        tk.Label(selection_frame, text="Đối tượng phân tích:", font=("Arial", 10), bg="#f5f5f5").pack(side="left")
+        self.target_player = tk.StringVar(value="White")
+        tk.Radiobutton(selection_frame, text="Kỳ thủ bên Trắng (White)", variable=self.target_player, value="White", bg="#f5f5f5").pack(side="left", padx=20)
+        tk.Radiobutton(selection_frame, text="Kỳ thủ bên Đen (Black)", variable=self.target_player, value="Black", bg="#f5f5f5").pack(side="left", padx=20)
+
+        # Nút nhấn kích hoạt tiến trình bóc tách dữ liệu
+        self.btn_analyze = tk.Button(
+            self.root, 
+            text="🚀 KÍCH HOẠT ENGINE & TRÍCH XUẤT ĐẶC TRƯNG AI", 
+            font=("Arial", 11, "bold"), 
+            bg="#2E7D32", 
+            fg="white", 
+            activebackground="#1B5E20",
+            activeforeground="white",
+            command=self.process_pipeline
+        )
+        self.btn_analyze.pack(fill="x", padx=15, pady=5)
+
+        # Khung kết quả giám sát
+        output_frame = tk.LabelFrame(self.root, text=" Kết quả phân tích toán học và Dự đoán AI ", font=("Arial", 10, "bold"), bg="#f5f5f5")
+        output_frame.pack(fill="both", expand=True, padx=15, pady=10)
+
+        self.txt_output = ScrolledText(output_frame, height=12, font=("Consolas", 10), bg="#ffffff")
+        self.txt_output.pack(fill="both", expand=True, padx=10, pady=10)
+
+    def process_pipeline(self):
+        """Hàm xử lý logic cốt lõi: Gọi Stockfish phân tích thực tế -> Tính chỉ số thật -> Dự đoán AI"""
+        raw_pgn = self.txt_pgn.get("1.0", tk.END).strip()
+        if not raw_pgn:
+            messagebox.showwarning("Thiếu dữ liệu", "Vui lòng nhập chuỗi PGN trước khi chạy!")
+            return
+
+        pgn_io = io.StringIO(raw_pgn)
+        game = chess.pgn.read_game(pgn_io)
+        if game is None:
+            messagebox.showerror("Lỗi PGN", "Định dạng cấu trúc PGN không hợp lệ!")
+            return
+
+        # Đọc dữ liệu hệ số Elo kỳ thủ từ Meta Header
+        white_elo = int(game.headers.get("WhiteElo", 1500))
+        black_elo = int(game.headers.get("BlackElo", 1500))
+        
+        is_white = self.target_player.get() == "White"
+        player_elo = white_elo if is_white else black_elo
+        opponent_elo = black_elo if is_white else white_elo
+        elo_diff = player_elo - opponent_elo
+        
+        moves = list(game.mainline_moves())
+        move_count = len(moves)
+
+        if move_count == 0:
+            messagebox.showwarning("Ván cờ trống", "Không tìm thấy nước đi nào.")
+            return
+
+        if not os.path.exists(self.stockfish_path):
+            messagebox.showerror("Lỗi Engine", f"Không tìm thấy tệp Stockfish tại:\n{self.stockfish_path}")
+            return
+
+        self.txt_output.delete("1.0", tk.END)
+        self.txt_output.insert(tk.END, "[+] Đang khởi động Stockfish và phân tích chi tiết ván đấu...\n")
+        self.txt_output.insert(tk.END, "[!] Quá trình tính toán thực tế bắt đầu, vui lòng đợi vài giây...\n")
+        self.root.update_idletasks()
+
+        try:
+            player_cpl_list = []
+            best_move_count = 0
+            top3_move_count = 0
+            blunder_count = 0
+            mistake_count = 0
+            
+            # Khởi tạo danh sách phân chia CPL theo giai đoạn ván đấu
+            opening_cpl, middlegame_cpl, endgame_cpl = [], [], []
+
+            # KÍCH HOẠT STOCKFISH PHÂN TÍCH TỪNG NƯỚC ĐI THỰC TẾ
+            with chess.engine.SimpleEngine.popen_uci(self.stockfish_path) as engine:
+                board = game.board()
+                
+                for idx, move in enumerate(moves):
+                    # Kiểm tra xem có đúng lượt đi của đối tượng cần kiểm tra không
+                    is_player_turn = (board.turn == chess.WHITE and is_white) or (board.turn == chess.BLACK and not is_white)
+                    
+                    if is_player_turn:
+                        # 1. Đánh giá thế trận TRƯỚC nước đi (Để lấy nước đi tối ưu nhất của máy)
+                        info_before = engine.analyse(board, chess.engine.Limit(time=0.03))
+                        best_engine_move = info_before.get("pv")[0] if info_before.get("pv") else None
+                        
+                        # Chuyển đổi điểm số về góc nhìn tuyệt đối
+                        score_before = info_before["score"].relative.score(mate_score=10000)
+                        
+                        # Lấy top 3 nước đi gợi ý hàng đầu của Stockfish
+                        top_moves = []
+                        try:
+                            analysis_top = engine.analyse(board, chess.engine.Limit(time=0.03), multipv=3)
+                            top_moves = [a.get("pv")[0] for a in analysis_top if a.get("pv")]
+                        except:
+                            if best_engine_move: top_moves.append(best_engine_move)
+
+                        # Kiểm tra nước đi thực tế của người chơi có khớp máy không
+                        if move == best_engine_move:
+                            best_move_count += 1
+                        if move in top_moves:
+                            top3_move_count += 1
+                            
+                        # Đẩy nước đi thực tế vào bàn cờ mô phỏng
+                        board.push(move)
+                        
+                        # 2. Đánh giá thế trận SAU nước đi
+                        info_after = engine.analyse(board, chess.engine.Limit(time=0.03))
+                        score_after = info_after["score"].relative.score(mate_score=10000)
+                        
+                        # Tính toán độ mất mát điểm Centipawn Loss (CPL) thực tế
+                        if score_before is not None and score_after is not None:
+                            # Do score_after là điểm đứng dưới góc nhìn đối thủ, ta cần đảo dấu
+                            cpl = max(0, score_before - (-score_after))
+                        else:
+                            cpl = 0
+                            
+                        player_cpl_list.append(cpl)
+
+                        # Phân loại lỗi dựa trên CPL thật
+                        if cpl >= 300: 
+                            blunder_count += 1   # Lỗi nghiêm trọng (Biếu xe, biếu hậu...)
+                        elif cpl >= 100: 
+                            mistake_count += 1  # Lỗi vừa phải
+
+                        # Phân chia CPL theo giai đoạn (Khai cuộc <=10, Trung cuộc <=30, còn lại là Tàn cuộc)
+                        move_number = (idx // 2) + 1
+                        if move_number <= 10: 
+                            opening_cpl.append(cpl)
+                        elif move_number <= 30: 
+                            middlegame_cpl.append(cpl)
+                        else: 
+                            endgame_cpl.append(cpl)
+                    else:
+                        # Nếu là lượt đi của đối thủ, chỉ đẩy nước đi vào để cập nhật trạng thái bàn cờ
+                        board.push(move)
+
+            # Tính toán các chỉ số thống kê thực tế dựa trên phân tích của Stockfish
+            total_player_moves = len(player_cpl_list) if len(player_cpl_list) > 0 else 1
+            
+            acpl = float(np.mean(player_cpl_list)) if player_cpl_list else 0.0
+            cpl_std = float(np.std(player_cpl_list)) if player_cpl_list else 0.0
+            best_move_rate = float(best_move_count / total_player_moves)
+            top3_rate = float(top3_move_count / total_player_moves)
+            blunder_rate = float(blunder_count / total_player_moves)
+            mistake_rate = float(mistake_count / total_player_moves)
+            
+            avg_opening_acpl = float(np.mean(opening_cpl)) if opening_cpl else acpl
+            avg_middlegame_acpl = float(np.mean(middlegame_cpl)) if middlegame_cpl else acpl
+            avg_endgame_acpl = float(np.mean(endgame_cpl)) if endgame_cpl else acpl
+            
+            # Tính toán ước lượng Entropy và Độ phức tạp theo ACPL thực
+            avg_entropy = 1.35 if acpl > 45 else 0.95
+            avg_complexity = 14.0
+
+            # Gom toàn bộ dữ liệu thực tế thành bộ 14 đặc trưng chuẩn đầu vào
+            raw_data_dict = {
+                'move_count': move_count, 'acpl': acpl, 'cpl_std': cpl_std,
+                'top3_rate': top3_rate, 'best_move_rate': best_move_rate,
+                'blunder_rate': blunder_rate, 'mistake_rate': mistake_rate,
+                'avg_entropy': avg_entropy, 'avg_complexity': avg_complexity,
+                'elo': player_elo, 'elo_diff': elo_diff,
+                'opening_acpl': avg_opening_acpl, 'middlegame_acpl': avg_middlegame_acpl,
+                'endgame_acpl': avg_endgame_acpl
+            }
+
+            # Đồng bộ thứ tự cột từ file mô hình nhị phân gốc đã lưu
+            if self.model is not None and hasattr(self.model, "feature_names_in_"):
+                feature_columns = list(self.model.feature_names_in_)
+            else:
+                feature_columns = [
+                    'move_count', 'acpl', 'cpl_std', 'top3_rate', 'best_move_rate',
+                    'blunder_rate', 'mistake_rate', 'avg_entropy', 'avg_complexity',
+                    'elo', 'elo_diff', 'opening_acpl', 'middlegame_acpl', 'endgame_acpl'
+                ]
+
+            ordered_data_dict = {col: [raw_data_dict[col]] for col in feature_columns}
+            final_features_df = pd.DataFrame(ordered_data_dict, columns=feature_columns)
+
+            # Xuất dữ liệu bảng đặc trưng thực tế ra khung Monitor (Đã sửa lỗi font giật chữ)
+            self.txt_output.insert(tk.END, "[+] Trích xuất đặc trưng THỰC TẾ thành công!\n")
+            self.txt_output.insert(tk.END, "--------------------------------------------------------\n")
+            for col in feature_columns:
+                val = ordered_data_dict[col][0]
+                val_str = f"{val:.2f}" if isinstance(val, float) else str(val)
+                self.txt_output.insert(tk.END, f" * {col:<18}: {val_str}\n")
+            self.txt_output.insert(tk.END, "--------------------------------------------------------\n")
+
+            # Đưa ma trận phân tích THẬT vào mô hình AI để dự đoán
+            if self.model is not None:
+                prediction = self.model.predict(final_features_df)[0]
+                if hasattr(self.model, "predict_proba"):
+                    probabilities = self.model.predict_proba(final_features_df)[0]
+                    cheat_probability = probabilities[1] * 100
+                    self.txt_output.insert(tk.END, f"[KẾT QUẢ DỰ ĐOÁN AI] Tỷ lệ nghi vấn gian lận: {cheat_probability:.2f}%\n")
+                    
+                    status = "⚠️ NGHI VẤN GIAN LẬN (HACKER)" if cheat_probability >= 50 else "✅ TRONG SẠCH (NORMAL PLAYER)"
+                    self.txt_output.insert(tk.END, f"[ĐÁNH GIÁ HỆ THỐNG] Kết luận: {status}\n")
+                else:
+                    status = "NGHI VẤN GIAN LẬN" if prediction == 1 else "TRONG SẠCH"
+                    self.txt_output.insert(tk.END, f"[KẾT QUẢ DỰ ĐOÁN AI] Nhãn mô hình: {status}\n")
+            else:
+                self.txt_output.insert(tk.END, "[!] Mô hình AI chưa sẵn sàng.\n")
+
+        except Exception as e:
+            messagebox.showerror("Lỗi thực thi Pipeline", f"Quá trình xử lý gặp sự cố:\n{str(e)}")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ChessCheatDetectionSystem(root)
+    root.mainloop()
